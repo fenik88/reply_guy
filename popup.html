@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+          width: 320px;
+          padding: 20px;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          font-family: system-ui, sans-serif;
+          margin: 0;
+        }
+        h2 {
+          margin: 0 0 12px 0;
+          font-size: 18px;
+          font-weight: 700;
+        }
+        .status {
+          background: rgba(255, 255, 255, 0.2);
+          padding: 12px;
+          border-radius: 8px;
+          margin-bottom: 15px;
+          text-align: center;
+          font-weight: 600;
+        }
+        .instructions {
+          background: rgba(255, 255, 255, 0.15);
+          padding: 15px;
+          border-radius: 8px;
+          font-size: 13px;
+          line-height: 1.6;
+        }
+        .instructions ol {
+          margin: 8px 0 0 0;
+          padding-left: 20px;
+        }
+        .instructions li {
+          margin-bottom: 6px;
+        }
+        .button {
+          background: white;
+          color: #667eea;
+          padding: 10px;
+          border-radius: 6px;
+          text-align: center;
+          font-weight: 600;
+          margin-top: 12px;
+          cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+<h2>✨ X Reply Generator</h2>
+<div class="status">Extension Active</div>
+<div class="instructions">
+    <strong>Quick Start:</strong>
+    <ol>
+        <li>Open the Web App in another tab</li>
+        <li>Keep it open while using X</li>
+        <li>Click "✨ Generate" on any tweet</li>
+        <li>Reply auto-pastes!</li>
+    </ol>
+</div>
+<div class="button" onclick="window.open('about:blank')">
+    Open Web App Tab
+</div>
+</body>
+</html>

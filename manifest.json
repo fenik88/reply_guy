@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "X Reply Generator",
+  "version": "3.0",
+  "description": "Auto-generate replies on X/Twitter",
+  "permissions": [
+    "activeTab",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://twitter.com/*",
+    "https://x.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://twitter.com/*", "https://x.com/*"],
+      "js": ["content.js"],
+      "css": ["styles.css"]
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  }
+}
