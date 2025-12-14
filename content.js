@@ -1,33 +1,12 @@
-let webAppWindow = null;
 let currentTone = 'bullish';
 
-// Find or open web app
-function getWebAppWindow() {
-  // Try to find existing web app tab
-  return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ action: 'findWebApp' }, (response) => {
-      if (response && response.found) {
-        resolve(true);
-      } else {
-        // Prompt user to open web app
-        if (confirm('Please open the Web App first! Click OK to open it now.')) {
-          window.open('about:blank', '_blank');
-          alert('Paste the Web App URL in the new tab, then refresh X/Twitter');
-        }
-        resolve(false);
-      }
-    });
-  });
-}
-
-// Add floating tone selector
 function addToneSelector() {
   if (document.querySelector('.ai-tone-floating')) return;
 
   const toneBar = document.createElement('div');
   toneBar.className = 'ai-tone-floating';
   toneBar.innerHTML = `
-    <div class="ai-tone-label">🎯 Reply Tone:</div>
+    <div class="ai-tone-label">🎯 Tone:</div>
     <select id="ai-global-tone" class="ai-tone-select-floating">
       <option value="bullish">Bullish</option>
       <option value="contrarian">Contrarian</option>
@@ -45,18 +24,9 @@ function addToneSelector() {
   const selector = document.getElementById('ai-global-tone');
   selector.addEventListener('change', (e) => {
     currentTone = e.target.value;
-    chrome.storage.local.set({ aiReplyTone: currentTone });
-  });
-
-  chrome.storage.local.get(['aiReplyTone'], (result) => {
-    if (result.aiReplyTone) {
-      currentTone = result.aiReplyTone;
-      selector.value = currentTone;
-    }
   });
 }
 
-// Extract images from tweet
 function extractImages(tweet) {
   const images = [];
   const imgElements = tweet.querySelectorAll('img[src*="pbs.twimg.com"]');
@@ -70,54 +40,26 @@ function extractImages(tweet) {
   return images;
 }
 
-// Send message to web app
-function sendToWebApp(tweetText, images) {
+function generateReply(tweetText, images) {
   return new Promise((resolve, reject) => {
-    const messageId = Date.now() + Math.random();
-
-    // Listen for response
-    const handleResponse = (event) => {
-      if (event.data.type === 'REPLY_GENERATED' && event.data.messageId === messageId) {
-        window.removeEventListener('message', handleResponse);
-        if (event.data.success) {
-          resolve(event.data.reply);
-        } else {
-          reject(new Error(event.data.error || 'Generation failed'));
-        }
-      }
-    };
-
-    window.addEventListener('message', handleResponse);
-
-    // Send to all tabs (web app will receive it)
-    window.postMessage({
-      type: 'GENERATE_REPLY',
-      messageId: messageId,
-      tweetText: tweetText,
-      images: images,
-      tone: currentTone
-    }, '*');
-
-    // Also broadcast to potential parent windows
-    if (window.opener) {
-      window.opener.postMessage({
-        type: 'GENERATE_REPLY',
-        messageId: messageId,
+    chrome.runtime.sendMessage(
+      {
+        action: 'generateReply',
         tweetText: tweetText,
         images: images,
         tone: currentTone
-      }, '*');
-    }
-
-    // Timeout after 15 seconds
-    setTimeout(() => {
-      window.removeEventListener('message', handleResponse);
-      reject(new Error('Timeout - is the Web App open?'));
-    }, 15000);
+      },
+      (response) => {
+        if (response.success) {
+          resolve(response.reply);
+        } else {
+          reject(new Error(response.error || 'Failed to generate'));
+        }
+      }
+    );
   });
 }
 
-// Add generate buttons to tweets
 function addGenerateButtons() {
   const tweets = document.querySelectorAll('article[data-testid="tweet"]');
 
@@ -144,17 +86,17 @@ function addGenerateButtons() {
         const tweetText = tweet.querySelector('[data-testid="tweetText"]')?.innerText || '';
         const images = extractImages(tweet);
 
-        // Click reply button to open reply box
+        // Open reply box
         const replyBtn = tweet.querySelector('[data-testid="reply"]');
         if (replyBtn && !document.querySelector('[data-testid="tweetTextarea_0"]')) {
           replyBtn.click();
           await new Promise(resolve => setTimeout(resolve, 800));
         }
 
-        // Send to web app
-        const reply = await sendToWebApp(tweetText, images);
+        // Generate reply via background worker
+        const reply = await generateReply(tweetText, images);
 
-        // Paste reply
+        // Paste it
         const replyBox = document.querySelector('[data-testid="tweetTextarea_0"]');
         if (replyBox) {
           replyBox.focus();
@@ -173,7 +115,8 @@ function addGenerateButtons() {
 
       } catch (error) {
         console.error('Error:', error);
-        btn.innerHTML = '❌ ' + (error.message.includes('Timeout') ? 'Open Web App!' : 'Error');
+        const isServerDown = error.message.includes('Failed to fetch') || error.message.includes('Server');
+        btn.innerHTML = '❌ ' + (isServerDown ? 'Server Down!' : 'Error');
         setTimeout(() => {
           btn.innerHTML = '✨ Generate';
           btn.disabled = false;
@@ -185,13 +128,20 @@ function addGenerateButtons() {
   });
 }
 
-// Initialize
+// Check server health on load
+chrome.runtime.sendMessage({ action: 'checkHealth' }, (response) => {
+  if (response && response.status === 'ok') {
+    console.log('✅ X Reply Generator server connected');
+  } else {
+    console.warn('⚠️ X Reply Generator server not running. Start the Python server!');
+  }
+});
+
 setTimeout(() => {
   addToneSelector();
   addGenerateButtons();
 }, 1000);
 
-// Watch for new tweets
 const observer = new MutationObserver(() => {
   addToneSelector();
   addGenerateButtons();
@@ -201,6 +151,3 @@ observer.observe(document.body, {
   childList: true,
   subtree: true
 });
-
-// Ping web app on load
-window.postMessage({ type: 'PING' }, '*');

@@ -10,7 +10,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
+  border: 2px solid rgba(255,255,255,0.3);
 }
 
 .ai-tone-label {
@@ -46,7 +46,7 @@
 
 .ai-generate-btn:hover:not(:disabled) {
   transform: scale(1.05) !important;
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.5) !important;
+  box-shadow: 0 4px 12px rgba(102,126,234,0.5) !important;
 }
 
 .ai-generate-btn:disabled {
