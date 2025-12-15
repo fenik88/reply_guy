@@ -1,25 +1,31 @@
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import json
+import os
 import requests
 
-# ⚠️ ADD YOUR GOOGLE GEMINI API KEY HERE ⚠️
-GEMINI_API_KEY = "AIzaSyCfvnMI83QLaclgqDIqz4LtgxpGeuhntgg"  # Get from https://makersuite.google.com/app/apikey
+# ✅ Put your key in an env var instead of hardcoding:
+# export GEMINI_API_KEY="AIza..."
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+
+# ✅ Use a model that exists for your key (from ListModels). Default is fast + stable.
+# You can override with: export GEMINI_MODEL="models/gemini-2.0-flash-001"
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "models/gemini-flash-latest").strip()
 
 class ReplyGeneratorHandler(BaseHTTPRequestHandler):
-    
+
     def _set_cors_headers(self):
         """Set CORS headers for all responses"""
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
         self.send_header('Access-Control-Max-Age', '3600')
-    
+
     def do_OPTIONS(self):
         """Handle CORS preflight requests"""
         self.send_response(200)
         self._set_cors_headers()
         self.end_headers()
-    
+
     def do_POST(self):
         if self.path == '/generate':
             try:
@@ -27,38 +33,38 @@ class ReplyGeneratorHandler(BaseHTTPRequestHandler):
                 content_length = int(self.headers.get('Content-Length', 0))
                 post_data = self.rfile.read(content_length)
                 data = json.loads(post_data.decode('utf-8'))
-                
+
                 tweet_text = data.get('tweetText', '')
                 images = data.get('images', [])
                 tone = data.get('tone', 'bullish')
-                
+
                 print(f"\n🐦 Received tweet: {tweet_text[:50]}...")
                 print(f"🎯 Tone: {tone}")
-                
+
                 # Generate reply using Gemini API
                 reply = self.generate_reply(tweet_text, images, tone)
-                
+
                 print(f"✅ Generated reply: {reply}\n")
-                
+
                 # Send response
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self._set_cors_headers()
                 self.end_headers()
-                
+
                 response = {
                     'success': True,
                     'reply': reply
                 }
                 self.wfile.write(json.dumps(response).encode('utf-8'))
-                
+
             except Exception as e:
                 print(f"❌ Error: {str(e)}\n")
                 self.send_response(500)
                 self.send_header('Content-Type', 'application/json')
                 self._set_cors_headers()
                 self.end_headers()
-                
+
                 response = {
                     'success': False,
                     'error': str(e)
@@ -67,7 +73,7 @@ class ReplyGeneratorHandler(BaseHTTPRequestHandler):
         else:
             self.send_response(404)
             self.end_headers()
-    
+
     def do_GET(self):
         if self.path == '/' or self.path == '/status':
             # Serve status page
@@ -76,7 +82,7 @@ class ReplyGeneratorHandler(BaseHTTPRequestHandler):
             self._set_cors_headers()
             self.end_headers()
             self.wfile.write(self.get_status_page().encode('utf-8'))
-            
+
         elif self.path == '/health':
             # Health check endpoint
             self.send_response(200)
@@ -89,22 +95,22 @@ class ReplyGeneratorHandler(BaseHTTPRequestHandler):
         else:
             self.send_response(404)
             self.end_headers()
-    
+
     def generate_reply(self, tweet_text, images, tone):
         """Generate reply using Google Gemini API"""
-        
-        if not GEMINI_API_KEY or GEMINI_API_KEY == "YOUR_GEMINI_API_KEY_HERE":
-            raise Exception("⚠️ Please add your Google Gemini API key at the top of reply_server.py")
-        
+
+        if not GEMINI_API_KEY:
+            raise Exception("⚠️ GEMINI_API_KEY is not set. Run: export GEMINI_API_KEY='AIza...' and restart the server")
+
         prompt = f"""You are an expert at crafting viral X (Twitter) replies for crypto and Polymarket content.
 
 TWEET TO REPLY TO:
 "{tweet_text}"
 """
-        
+
         if images and len(images) > 0:
             prompt += f"\n\nThe tweet contains {len(images)} image(s). Consider visual context in your reply."
-        
+
         prompt += f"""
 
 TONE: {tone}
@@ -122,8 +128,8 @@ Generate ONE perfect reply. The reply must:
 Return ONLY the reply text, nothing else. No quotes, no preamble, just the reply."""
 
         # Call Google Gemini API
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-        
+        url = f"https://generativelanguage.googleapis.com/v1beta/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+
         response = requests.post(
             url,
             headers={
@@ -143,28 +149,28 @@ Return ONLY the reply text, nothing else. No quotes, no preamble, just the reply
             },
             timeout=30
         )
-        
+
         if response.status_code != 200:
             raise Exception(f"Gemini API Error: {response.status_code} - {response.text}")
-        
+
         data = response.json()
-        
+
         # Extract reply from Gemini response
         try:
             reply = data['candidates'][0]['content']['parts'][0]['text'].strip()
         except (KeyError, IndexError) as e:
             raise Exception(f"Failed to parse Gemini response: {str(e)}")
-        
+
         # Clean up the reply
         reply = reply.strip('"').strip("'").strip()
-        
+
         return reply
-    
+
     def get_status_page(self):
         """Return HTML status page"""
-        api_status = "✅ Gemini API Key Configured" if GEMINI_API_KEY != "YOUR_GEMINI_API_KEY_HERE" else "⚠️ API Key Missing"
-        status_color = "#10b981" if GEMINI_API_KEY != "YOUR_GEMINI_API_KEY_HERE" else "#f59e0b"
-        
+        api_status = "✅ Gemini API Key Configured" if GEMINI_API_KEY else "⚠️ API Key Missing"
+        status_color = "#10b981" if GEMINI_API_KEY else "#f59e0b"
+
         return f"""
 <!DOCTYPE html>
 <html>
@@ -272,9 +278,9 @@ Return ONLY the reply text, nothing else. No quotes, no preamble, just the reply
         <div class="status">🟢 SERVER ONLINE</div>
         <div class="api-status">{api_status}</div>
         <div class="free-badge">🆓 100% FREE API</div>
-        <div class="model-info">🤖 Using Google Gemini 1.5 Flash</div>
+        <div class="model-info">🤖 Model: {GEMINI_MODEL}</div>
         <div class="url">http://localhost:8765</div>
-        
+
         <div class="instructions">
             <h3>📋 Status</h3>
             <div class="step">✅ Server running on port 8765</div>
@@ -287,35 +293,33 @@ Return ONLY the reply text, nothing else. No quotes, no preamble, just the reply
 </body>
 </html>
 """
-    
+
     def log_message(self, format, *args):
         # Suppress default logging, we have custom prints
         return
 
 def run_server(port=8765):
-    if not GEMINI_API_KEY or GEMINI_API_KEY == "YOUR_GEMINI_API_KEY_HERE":
+    if not GEMINI_API_KEY:
         print("\n" + "=" * 60)
         print("⚠️  WARNING: GEMINI API KEY NOT SET")
         print("=" * 60)
-        print("\nPlease add your Google Gemini API key")
-        print("\nGet your FREE API key from:")
-        print("  https://makersuite.google.com/app/apikey")
-        print("\nReplace this line in reply_server.py:")
-        print('  GEMINI_API_KEY = "YOUR_GEMINI_API_KEY_HERE"')
-        print("\nWith your actual key:")
-        print('  GEMINI_API_KEY = "AIza..."')
-        print("\n💚 It's 100% FREE - no credit card needed!")
+        print("\nSet your FREE Gemini API key as an environment variable and restart:")
+        print("\n  export GEMINI_API_KEY=\"AIza...\"")
+        print("\nOptional: choose a model you have access to:")
+        print("  export GEMINI_MODEL=\"models/gemini-2.0-flash-001\"")
+        print("\nThen run:")
+        print("  python3 python-server.py")
         print("\n" + "=" * 60 + "\n")
-    
+
     server_address = ('', port)
     httpd = HTTPServer(server_address, ReplyGeneratorHandler)
-    
+
     print("=" * 60)
     print("✨ X Reply Generator Server (Google Gemini)")
     print("=" * 60)
     print(f"\n🚀 Server running on http://localhost:{port}")
     print(f"📊 Status page: http://localhost:{port}/")
-    print(f"🤖 Using Google Gemini 1.5 Flash (FREE)")
+    print(f"🤖 Model: {GEMINI_MODEL}")
     print(f"💚 Free tier: 1500 requests/day")
     print(f"\n💡 Keep this window open while using the extension")
     print(f"🛑 Press Ctrl+C to stop the server\n")

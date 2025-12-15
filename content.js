@@ -1,4 +1,33 @@
+
 let currentTone = 'bullish';
+
+function safeRuntimeSendMessage(payload) {
+  return new Promise((resolve, reject) => {
+    try {
+      // When the extension is reloaded/updated, the content-script context can be invalidated.
+      if (!chrome || !chrome.runtime || !chrome.runtime.id) {
+        reject(new Error('Extension context invalidated'));
+        return;
+      }
+
+      chrome.runtime.sendMessage(payload, (response) => {
+        const err = chrome.runtime.lastError;
+        if (err) {
+          reject(new Error(err.message || 'Runtime error'));
+          return;
+        }
+        resolve(response);
+      });
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+function isContextInvalidatedError(message) {
+  const m = (message || '').toLowerCase();
+  return m.includes('extension context invalidated') || m.includes('context invalidated');
+}
 
 function addToneSelector() {
   if (document.querySelector('.ai-tone-floating')) return;
@@ -41,22 +70,16 @@ function extractImages(tweet) {
 }
 
 function generateReply(tweetText, images) {
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(
-      {
-        action: 'generateReply',
-        tweetText: tweetText,
-        images: images,
-        tone: currentTone
-      },
-      (response) => {
-        if (response.success) {
-          resolve(response.reply);
-        } else {
-          reject(new Error(response.error || 'Failed to generate'));
-        }
-      }
-    );
+  return safeRuntimeSendMessage({
+    action: 'generateReply',
+    tweetText: tweetText,
+    images: images,
+    tone: currentTone
+  }).then((response) => {
+    if (response && response.success) {
+      return response.reply;
+    }
+    throw new Error((response && response.error) || 'Failed to generate');
   });
 }
 
@@ -115,8 +138,10 @@ function addGenerateButtons() {
 
       } catch (error) {
         console.error('Error:', error);
-        const isServerDown = error.message.includes('Failed to fetch') || error.message.includes('Server');
-        btn.innerHTML = '❌ ' + (isServerDown ? 'Server Down!' : 'Error');
+        const msg = error && error.message ? error.message : String(error);
+        const isInvalidated = isContextInvalidatedError(msg);
+        const isServerDown = msg.includes('Failed to fetch') || msg.includes('Server');
+        btn.innerHTML = '❌ ' + (isInvalidated ? 'Reload Extension' : (isServerDown ? 'Server Down!' : 'Error'));
         setTimeout(() => {
           btn.innerHTML = '✨ Generate';
           btn.disabled = false;
@@ -129,13 +154,22 @@ function addGenerateButtons() {
 }
 
 // Check server health on load
-chrome.runtime.sendMessage({ action: 'checkHealth' }, (response) => {
-  if (response && response.status === 'ok') {
-    console.log('✅ X Reply Generator server connected');
-  } else {
-    console.warn('⚠️ X Reply Generator server not running. Start the Python server!');
-  }
-});
+safeRuntimeSendMessage({ action: 'checkHealth' })
+  .then((response) => {
+    if (response && response.status === 'ok') {
+      console.log('✅ X Reply Generator server connected');
+    } else {
+      console.warn('⚠️ X Reply Generator server not running. Start the Python server!');
+    }
+  })
+  .catch((err) => {
+    const msg = err && err.message ? err.message : String(err);
+    if (isContextInvalidatedError(msg)) {
+      console.warn('⚠️ Extension context invalidated (likely extension reloaded). Refresh the page.');
+    } else {
+      console.warn('⚠️ Health check failed:', msg);
+    }
+  });
 
 setTimeout(() => {
   addToneSelector();
@@ -150,4 +184,7 @@ const observer = new MutationObserver(() => {
 observer.observe(document.body, {
   childList: true,
   subtree: true
+});
+window.addEventListener('beforeunload', () => {
+  try { observer.disconnect(); } catch (_) {}
 });
