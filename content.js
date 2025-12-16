@@ -1,10 +1,8 @@
-
 let currentTone = 'bullish';
 
 function safeRuntimeSendMessage(payload) {
   return new Promise((resolve, reject) => {
     try {
-      // When the extension is reloaded/updated, the content-script context can be invalidated.
       if (!chrome || !chrome.runtime || !chrome.runtime.id) {
         reject(new Error('Extension context invalidated'));
         return;
@@ -27,6 +25,115 @@ function safeRuntimeSendMessage(payload) {
 function isContextInvalidatedError(message) {
   const m = (message || '').toLowerCase();
   return m.includes('extension context invalidated') || m.includes('context invalidated');
+}
+
+function getXComposerEditable(root = document) {
+  // Prefer currently focused editable textbox
+  const active = document.activeElement;
+  if (active && active.getAttribute) {
+    const ce = active.getAttribute('contenteditable');
+    const role = active.getAttribute('role');
+    if (ce === 'true' && role === 'textbox') return active;
+  }
+
+  // Prefer reply dialog composer
+  const dialog = root.querySelector?.('[role="dialog"]') || root;
+
+  // X sometimes wraps the contenteditable inside tweetTextarea_0
+  const inner = dialog.querySelector?.('[data-testid="tweetTextarea_0"] [role="textbox"][contenteditable="true"]')
+    || dialog.querySelector?.('[data-testid="tweetTextarea_0"] [contenteditable="true"]');
+  if (inner) return inner;
+
+  // Or tweetTextarea_0 itself may be the textbox
+  const outer = dialog.querySelector?.('[data-testid="tweetTextarea_0"][role="textbox"][contenteditable="true"]')
+    || dialog.querySelector?.('[data-testid="tweetTextarea_0"][contenteditable="true"]');
+  if (outer) return outer;
+
+  // Fallback: any textbox
+  return dialog.querySelector?.('[role="textbox"][contenteditable="true"][aria-label]')
+    || dialog.querySelector?.('[role="textbox"][contenteditable="true"]');
+}
+
+function dispatchPaste(editable, text) {
+  try {
+    // DataTransfer is supported in Chromium; if missing, we'll fall back
+    const dt = new DataTransfer();
+    dt.setData('text/plain', text);
+
+    const ev = new ClipboardEvent('paste', {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: dt
+    });
+
+    return editable.dispatchEvent(ev);
+  } catch (_) {
+    return false;
+  }
+}
+
+function selectAllInEditable(editable) {
+  try {
+    const sel = window.getSelection();
+    if (!sel) return;
+    sel.removeAllRanges();
+    const range = document.createRange();
+    range.selectNodeContents(editable);
+    sel.addRange(range);
+  } catch (_) {}
+}
+
+// Insert text into X editor in a way that updates internal state
+async function pasteIntoXEditor(replyBox, text) {
+  const dialogRoot = document.querySelector('[role="dialog"]') || document;
+  const editable = getXComposerEditable(dialogRoot) || replyBox;
+
+  // Ensure focus on the real editable node
+  try { editable.focus(); } catch (_) {}
+  try { editable.click(); } catch (_) {}
+
+  // Let X mount/update
+  await new Promise(r => requestAnimationFrame(r));
+
+  // 1) Try paste event (best for X/Lexical to update internal state)
+  const pasted = dispatchPaste(editable, text);
+
+  // Fallback ONLY if paste fails
+  if (!pasted) {
+    try {
+      document.execCommand('insertText', false, text);
+    } catch (_) {}
+  }
+
+  // 3) Fire input to notify frameworks
+  try {
+    editable.dispatchEvent(new InputEvent('input', {
+      bubbles: true,
+      inputType: 'insertFromPaste',
+      data: text,
+      composed: true
+    }));
+  } catch (_) {
+    try { editable.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+  }
+
+  // Nudge editor to allow further typing
+  try {
+    editable.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+    editable.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true }));
+  } catch (_) {}
+
+  // Caret to end inside text node
+  try {
+    const sel = window.getSelection();
+    if (sel && editable.firstChild) {
+      const range = document.createRange();
+      range.setStart(editable.firstChild, editable.firstChild.length || 0);
+      range.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+  } catch (_) {}
 }
 
 function addToneSelector() {
@@ -111,23 +218,29 @@ function addGenerateButtons() {
 
         // Open reply box
         const replyBtn = tweet.querySelector('[data-testid="reply"]');
-        if (replyBtn && !document.querySelector('[data-testid="tweetTextarea_0"]')) {
+        const dialogRoot = () => document.querySelector('[role="dialog"]') || document;
+        if (replyBtn && !getXComposerEditable(dialogRoot())) {
           replyBtn.click();
-          await new Promise(resolve => setTimeout(resolve, 800));
+          await new Promise(resolve => setTimeout(resolve, 1400));
         }
 
         // Generate reply via background worker
+        const replyBox = getXComposerEditable(dialogRoot()) || document.querySelector('[role="dialog"] [data-testid="tweetTextarea_0"]') || document.querySelector('[data-testid="tweetTextarea_0"]');
         const reply = await generateReply(tweetText, images);
 
         // Paste it
-        const replyBox = document.querySelector('[data-testid="tweetTextarea_0"]');
         if (replyBox) {
-          replyBox.focus();
-          replyBox.textContent = '';
-          document.execCommand('insertText', false, reply);
-          replyBox.dispatchEvent(new Event('input', { bubbles: true }));
+          await pasteIntoXEditor(replyBox, reply);
 
-          btn.innerHTML = '✅ Pasted!';
+          const editable = getXComposerEditable(dialogRoot()) || replyBox;
+          const hasText = (((editable.innerText || editable.textContent || '')).trim().length > 0);
+
+          if (!hasText) {
+            try { await navigator.clipboard.writeText(reply); } catch (_) {}
+            btn.innerHTML = '📋 Copied — Paste to edit';
+          } else {
+            btn.innerHTML = '✅ Pasted!';
+          }
           setTimeout(() => {
             btn.innerHTML = '✨ Generate';
             btn.disabled = false;
@@ -184,7 +297,4 @@ const observer = new MutationObserver(() => {
 observer.observe(document.body, {
   childList: true,
   subtree: true
-});
-window.addEventListener('beforeunload', () => {
-  try { observer.disconnect(); } catch (_) {}
 });
