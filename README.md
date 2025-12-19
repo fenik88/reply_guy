@@ -33,7 +33,7 @@
 ### Шаг 1: Скачай проект
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/x-reply-generator.git
+git clone https://github.com/YOUR_USERNAME/reply_guy.git
 cd reply_guy
 ```
 
