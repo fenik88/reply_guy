@@ -27,11 +27,6 @@ function isContextInvalidatedError(message) {
   return m.includes('extension context invalidated') || m.includes('context invalidated');
 }
 
-// Check if we're on a tweet detail page (in comments) or in feed
-function isInTweetDetailPage() {
-  return window.location.pathname.includes('/status/');
-}
-
 function getXComposerEditable(root = document) {
   // Prefer currently focused editable textbox
   const active = document.activeElement;
@@ -57,6 +52,20 @@ function getXComposerEditable(root = document) {
   // Fallback: any textbox
   return dialog.querySelector?.('[role="textbox"][contenteditable="true"][aria-label]')
     || dialog.querySelector?.('[role="textbox"][contenteditable="true"]');
+}
+
+// Check if a reply dialog is actually open (not the main compose dialog)
+function isReplyDialogOpen() {
+  const dialog = document.querySelector('[role="dialog"]');
+  if (!dialog) return false;
+  
+  // Reply dialogs usually have "Replying to" text
+  const replyingTo = dialog.querySelector('[data-testid="reply-to"]');
+  if (replyingTo) return true;
+  
+  // Or check for the reply context text
+  const hasReplyContext = dialog.textContent?.includes('Replying to');
+  return hasReplyContext;
 }
 
 function dispatchPaste(editable, text) {
@@ -183,77 +192,6 @@ function generateReply(tweetText, images) {
   });
 }
 
-// NEW: Navigate to tweet's comment section
-function navigateToTweetComments(tweet) {
-  return new Promise((resolve, reject) => {
-    try {
-      // Find the tweet link (timestamp link that goes to tweet detail)
-      const timeLink = tweet.querySelector('time')?.parentElement;
-      
-      if (timeLink && timeLink.href) {
-        // Navigate to the tweet detail page
-        window.location.href = timeLink.href;
-        resolve();
-      } else {
-        reject(new Error('Could not find tweet link'));
-      }
-    } catch (e) {
-      reject(e);
-    }
-  });
-}
-
-// Check for pending reply after navigation
-async function checkPendingReply() {
-  const pendingData = sessionStorage.getItem('x_reply_pending');
-  
-  if (pendingData) {
-    try {
-      const data = JSON.parse(pendingData);
-      
-      // Check if data is recent (within last 10 seconds)
-      if (Date.now() - data.timestamp < 10000) {
-        console.log('🔄 Resuming reply generation after navigation...');
-        
-        // Clear the pending data
-        sessionStorage.removeItem('x_reply_pending');
-        
-        // Wait for page to load
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        // Find and click reply button to open reply box
-        const mainTweet = document.querySelector('article[data-testid="tweet"]');
-        if (mainTweet) {
-          const replyBtn = mainTweet.querySelector('[data-testid="reply"]');
-          if (replyBtn) {
-            replyBtn.click();
-            await new Promise(resolve => setTimeout(resolve, 1400));
-          }
-        }
-        
-        // Generate reply with stored data
-        currentTone = data.tone || 'bullish';
-        const reply = await generateReply(data.tweetText, data.images);
-        
-        // Paste it
-        const dialogRoot = document.querySelector('[role="dialog"]') || document;
-        const replyBox = getXComposerEditable(dialogRoot);
-        
-        if (replyBox) {
-          await pasteIntoXEditor(replyBox, reply);
-          console.log('✅ Reply generated and pasted after navigation!');
-        }
-      } else {
-        // Data too old, clear it
-        sessionStorage.removeItem('x_reply_pending');
-      }
-    } catch (e) {
-      console.error('Error processing pending reply:', e);
-      sessionStorage.removeItem('x_reply_pending');
-    }
-  }
-}
-
 function addGenerateButtons() {
   const tweets = document.querySelectorAll('article[data-testid="tweet"]');
 
@@ -280,60 +218,69 @@ function addGenerateButtons() {
         const tweetText = tweet.querySelector('[data-testid="tweetText"]')?.innerText || '';
         const images = extractImages(tweet);
 
-        const isDetailPage = isInTweetDetailPage();
-
-        if (!isDetailPage) {
-          // We're in the feed - need to navigate to comments first
-          btn.innerHTML = '🔄 Opening comments...';
-          
-          // Store the data to generate after reload
-          sessionStorage.setItem('x_reply_pending', JSON.stringify({
-            tweetText: tweetText,
-            images: images,
-            tone: currentTone,
-            timestamp: Date.now()
-          }));
-          
-          // Navigate to tweet detail page
-          await navigateToTweetComments(tweet);
-          
-          // Navigation will happen, button state doesn't matter
-          return;
+        // Find and click reply button
+        const replyBtn = tweet.querySelector('[data-testid="reply"]');
+        
+        if (!replyBtn) {
+          throw new Error('Reply button not found');
         }
 
-        // We're already on tweet detail page - generate and paste
-        // Open reply box
-        const replyBtn = tweet.querySelector('[data-testid="reply"]');
-        const dialogRoot = () => document.querySelector('[role="dialog"]') || document;
-        if (replyBtn && !getXComposerEditable(dialogRoot())) {
-          replyBtn.click();
-          await new Promise(resolve => setTimeout(resolve, 1400));
+        // Close any open dialogs first
+        const existingDialog = document.querySelector('[role="dialog"]');
+        if (existingDialog && !isReplyDialogOpen()) {
+          const closeBtn = existingDialog.querySelector('[aria-label="Close"]') || 
+                          existingDialog.querySelector('button[data-testid*="close"]');
+          if (closeBtn) {
+            closeBtn.click();
+            await new Promise(resolve => setTimeout(resolve, 300));
+          }
+        }
+
+        // Click reply button to open reply dialog
+        replyBtn.click();
+        
+        // Wait for reply dialog to open
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Verify reply dialog is actually open
+        let attempts = 0;
+        while (!isReplyDialogOpen() && attempts < 5) {
+          await new Promise(resolve => setTimeout(resolve, 300));
+          attempts++;
+        }
+        
+        if (!isReplyDialogOpen()) {
+          throw new Error('Reply dialog did not open - try clicking reply manually');
         }
 
         // Generate reply via background worker
-        const replyBox = getXComposerEditable(dialogRoot()) || document.querySelector('[role="dialog"] [data-testid="tweetTextarea_0"]') || document.querySelector('[data-testid="tweetTextarea_0"]');
+        const dialogRoot = document.querySelector('[role="dialog"]');
+        const replyBox = getXComposerEditable(dialogRoot);
+        
+        if (!replyBox) {
+          throw new Error('Reply box not found in dialog');
+        }
+
+        btn.innerHTML = '🤖 AI thinking...';
         const reply = await generateReply(tweetText, images);
 
         // Paste it
-        if (replyBox) {
-          await pasteIntoXEditor(replyBox, reply);
+        await pasteIntoXEditor(replyBox, reply);
 
-          const editable = getXComposerEditable(dialogRoot()) || replyBox;
-          const hasText = (((editable.innerText || editable.textContent || '')).trim().length > 0);
+        const editable = getXComposerEditable(dialogRoot) || replyBox;
+        const hasText = (((editable.innerText || editable.textContent || '')).trim().length > 0);
 
-          if (!hasText) {
-            try { await navigator.clipboard.writeText(reply); } catch (_) {}
-            btn.innerHTML = '📋 Copied — Paste to edit';
-          } else {
-            btn.innerHTML = '✅ Pasted!';
-          }
-          setTimeout(() => {
-            btn.innerHTML = '✨ Generate';
-            btn.disabled = false;
-          }, 2000);
+        if (!hasText) {
+          try { await navigator.clipboard.writeText(reply); } catch (_) {}
+          btn.innerHTML = '📋 Copied — Paste to edit';
         } else {
-          throw new Error('Reply box not found');
+          btn.innerHTML = '✅ Pasted!';
         }
+        
+        setTimeout(() => {
+          btn.innerHTML = '✨ Generate';
+          btn.disabled = false;
+        }, 2000);
 
       } catch (error) {
         console.error('Error:', error);
@@ -373,7 +320,6 @@ safeRuntimeSendMessage({ action: 'checkHealth' })
 setTimeout(() => {
   addToneSelector();
   addGenerateButtons();
-  checkPendingReply(); // Check if we need to resume generation
 }, 1000);
 
 const observer = new MutationObserver(() => {
