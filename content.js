@@ -68,61 +68,56 @@ function isReplyDialogOpen() {
   return hasReplyContext;
 }
 
-function dispatchPaste(editable, text) {
-  try {
-    const dt = new DataTransfer();
-    dt.setData('text/plain', text);
-
-    const ev = new ClipboardEvent('paste', {
-      bubbles: true,
-      cancelable: true,
-      clipboardData: dt
-    });
-
-    return editable.dispatchEvent(ev);
-  } catch (_) {
-    return false;
-  }
-}
-
-// Insert text into X editor in a way that updates internal state
+// Insert text into X (Lexical) editor using real clipboard paste
 async function pasteIntoXEditor(replyBox, text) {
   const dialogRoot = document.querySelector('[role="dialog"]') || document;
   const editable = getXComposerEditable(dialogRoot) || replyBox;
 
-  // Ensure focus on the real editable node
-  try { editable.focus(); } catch (_) {}
-  try { editable.click(); } catch (_) {}
-
-  // Let X mount/update
-  await new Promise(r => requestAnimationFrame(r));
-
-  // Try paste event (best for X/Lexical to update internal state)
-  const pasted = dispatchPaste(editable, text);
-
-  // Fallback ONLY if paste fails — do NOT also fire InputEvent, that causes duplication
-  if (!pasted) {
-    try {
-      document.execCommand('insertText', false, text);
-    } catch (_) {}
-
-    // Fire input only when paste failed and we used execCommand
-    try {
-      editable.dispatchEvent(new Event('input', { bubbles: true }));
-    } catch (_) {}
+  // Write to real clipboard
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (_) {
+    // Fallback: execCommand copy from temp element
+    const tmp = document.createElement('textarea');
+    tmp.value = text;
+    tmp.style.position = 'fixed';
+    tmp.style.opacity = '0';
+    document.body.appendChild(tmp);
+    tmp.select();
+    document.execCommand('copy');
+    document.body.removeChild(tmp);
   }
 
-  // Caret to end inside text node
-  try {
-    const sel = window.getSelection();
-    if (sel && editable.firstChild) {
-      const range = document.createRange();
-      range.setStart(editable.firstChild, editable.firstChild.length || 0);
-      range.collapse(true);
-      sel.removeAllRanges();
-      sel.addRange(range);
-    }
-  } catch (_) {}
+  // Focus the editor
+  try { editable.focus(); } catch (_) {}
+  await new Promise(r => setTimeout(r, 100));
+
+  // Simulate real Ctrl+V — Lexical handles this natively without duplication
+  editable.dispatchEvent(new KeyboardEvent('keydown', {
+    key: 'v', code: 'KeyV', keyCode: 86,
+    ctrlKey: true, metaKey: false,
+    bubbles: true, cancelable: true
+  }));
+  editable.dispatchEvent(new KeyboardEvent('keyup', {
+    key: 'v', code: 'KeyV', keyCode: 86,
+    ctrlKey: true, metaKey: false,
+    bubbles: true
+  }));
+
+  await new Promise(r => setTimeout(r, 150));
+
+  // Check if Lexical actually processed it
+  const content = (editable.innerText || editable.textContent || '').trim();
+  if (!content) {
+    // Last resort: DataTransfer paste event
+    const dt = new DataTransfer();
+    dt.setData('text/plain', text);
+    editable.dispatchEvent(new ClipboardEvent('paste', {
+      clipboardData: dt,
+      bubbles: true,
+      cancelable: true
+    }));
+  }
 }
 
 function addToneSelector() {
