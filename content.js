@@ -100,30 +100,17 @@ async function pasteIntoXEditor(replyBox, text) {
   // Try paste event (best for X/Lexical to update internal state)
   const pasted = dispatchPaste(editable, text);
 
-  // Fallback ONLY if paste fails
+  // Fallback ONLY if paste fails — do NOT also fire InputEvent, that causes duplication
   if (!pasted) {
     try {
       document.execCommand('insertText', false, text);
     } catch (_) {}
-  }
 
-  // Fire input to notify frameworks
-  try {
-    editable.dispatchEvent(new InputEvent('input', {
-      bubbles: true,
-      inputType: 'insertFromPaste',
-      data: text,
-      composed: true
-    }));
-  } catch (_) {
-    try { editable.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+    // Fire input only when paste failed and we used execCommand
+    try {
+      editable.dispatchEvent(new Event('input', { bubbles: true }));
+    } catch (_) {}
   }
-
-  // Nudge editor to allow further typing
-  try {
-    editable.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
-    editable.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true }));
-  } catch (_) {}
 
   // Caret to end inside text node
   try {
