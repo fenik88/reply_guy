@@ -2,11 +2,18 @@
 
 ## За 5 минут до первого ответа!
 
+Используем командную строку или терминал
+И через терминал переходим в папку куда хотим установить софт
+
+Для начала установим git
+https://git-scm.com/install/
+
+
 ### 1️⃣ Скачай проект
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/x-reply-generator.git
-cd x-reply-generator
+git clone https://github.com/YOUR_USERNAME/reply_guy.git
+cd reply_guy
 ```
 
 ### 2️⃣ Получи БЕСПЛАТНЫЙ API ключ
@@ -53,7 +60,7 @@ python python-server.py
 2. Перейди на `chrome://extensions/`
 3. Включи **Developer mode** (справа вверху)
 4. Нажми **Load unpacked**
-5. Выбери папку `x-reply-generator`
+5. Выбери папку `reply_guy`
 6. Готово! ✅
 
 ### 5️⃣ Настрой свой стиль (опционально)

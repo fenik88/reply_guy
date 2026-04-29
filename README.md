@@ -33,8 +33,8 @@
 ### Шаг 1: Скачай проект
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/x-reply-generator.git
-cd x-reply-generator
+git clone https://github.com/YOUR_USERNAME/reply_guy.git
+cd reply_guy
 ```
 
 ### Шаг 2: Получи бесплатный API ключ Groq
@@ -73,7 +73,7 @@ python python-server.py
 1. Открой Chrome и перейди на `chrome://extensions/`
 2. Включи **"Developer mode"** (переключатель в правом верхнем углу)
 3. Нажми **"Load unpacked"**
-4. Выбери папку `x-reply-generator` (корневая папка проекта)
+4. Выбери папку `reply_guy` (корневая папка проекта)
 5. Расширение установлено! ✅
 
 ### Шаг 5: Настрой свой стиль (опционально)
@@ -146,7 +146,7 @@ export GROQ_MODEL="llama-3.3-70b-versatile"  # Более умная, но ме�
 ### Структура проекта
 
 ```
-x-reply-generator/
+reply_guy/
 ├── manifest.json          # Конфиг Chrome расширения
 ├── content.js             # Скрипт для X/Twitter
 ├── background.js          # Background worker
